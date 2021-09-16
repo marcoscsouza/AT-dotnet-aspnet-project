@@ -2,28 +2,42 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
-using Model.Models;
-using WebMVC.Data;
+using WebMVC.Models;
+using WebMVC.Services;
 
 namespace WebMVC.Controllers
 {
+    [Authorize]
     public class MusicoController : Controller
     {
-        private readonly BandaATContext _context;
+        private readonly IMusicoHttpService _musicoHttpService;
+        private readonly IBandaHttpService _bandaHttpService;
 
-        public MusicoController(BandaATContext context)
+        public MusicoController(IMusicoHttpService musicoHttpService,
+                                IBandaHttpService bandaHttpService)
         {
-            _context = context;
+
+            _musicoHttpService = musicoHttpService;
+            _bandaHttpService = bandaHttpService;
         }
 
         // GET: Musico
-        public async Task<IActionResult> Index()
+        public async Task<IActionResult> Index(MusicoIndexViewModel musicoIndexRequest)
         {
-            var bandaATContext = _context.Musicos.Include(m => m.Banda);
-            return View(await bandaATContext.ToListAsync());
+            var musicoIndexViewModel = new MusicoIndexViewModel
+            {
+                Search = musicoIndexRequest.Search,
+                OrderAscendant = musicoIndexRequest.OrderAscendant,
+                Musicos = await _musicoHttpService.GetAllAsync(
+                    musicoIndexRequest.OrderAscendant,
+                    musicoIndexRequest.Search)
+            };
+
+            return View(musicoIndexViewModel);
         }
 
         // GET: Musico/Details/5
@@ -34,21 +48,21 @@ namespace WebMVC.Controllers
                 return NotFound();
             }
 
-            var musicoModel = await _context.Musicos
-                .Include(m => m.Banda)
-                .FirstOrDefaultAsync(m => m.Id == id);
-            if (musicoModel == null)
+            var musicoViewModel = await _musicoHttpService.GetByIdAsync(id.Value);
+
+            if (musicoViewModel == null)
             {
                 return NotFound();
             }
 
-            return View(musicoModel);
+            return View(musicoViewModel);
         }
 
         // GET: Musico/Create
-        public IActionResult Create()
+        public async Task<IActionResult> Create()
         {
-            ViewData["BandaId"] = new SelectList(_context.Bandas, "Id", "Id");
+            await PreencherSelectBandas();
+
             return View();
         }
 
@@ -57,16 +71,18 @@ namespace WebMVC.Controllers
         // For more details, see http://go.microsoft.com/fwlink/?LinkId=317598.
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Create(MusicoModel musicoModel)
+        public async Task<IActionResult> Create(MusicoViewModel musicoViewModel)
         {
-            if (ModelState.IsValid)
+            if (!ModelState.IsValid)
             {
-                _context.Add(musicoModel);
-                await _context.SaveChangesAsync();
-                return RedirectToAction(nameof(Index));
+                await PreencherSelectBandas(musicoViewModel.BandaId);
+
+                return View(musicoViewModel);
             }
-            ViewData["BandaId"] = new SelectList(_context.Bandas, "Id", "Id", musicoModel.BandaId);
-            return View(musicoModel);
+
+            var musicoCriado = await _musicoHttpService.CreateAsync(musicoViewModel);
+
+            return RedirectToAction(nameof(Details), new { id = musicoCriado.Id });
         }
 
         // GET: Musico/Edit/5
@@ -77,13 +93,15 @@ namespace WebMVC.Controllers
                 return NotFound();
             }
 
-            var musicoModel = await _context.Musicos.FindAsync(id);
-            if (musicoModel == null)
+            var musicoViewModel = await _musicoHttpService.GetByIdAsync(id.Value);
+            if (musicoViewModel == null)
             {
                 return NotFound();
             }
-            ViewData["BandaId"] = new SelectList(_context.Bandas, "Id", "Id", musicoModel.BandaId);
-            return View(musicoModel);
+
+            await PreencherSelectBandas(musicoViewModel.BandaId);
+
+            return View(musicoViewModel);
         }
 
         // POST: Musico/Edit/5
@@ -91,35 +109,36 @@ namespace WebMVC.Controllers
         // For more details, see http://go.microsoft.com/fwlink/?LinkId=317598.
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Edit(int id, MusicoModel musicoModel)
+        public async Task<IActionResult> Edit(int id, MusicoViewModel musicoViewModel)
         {
-            if (id != musicoModel.Id)
+            if (id != musicoViewModel.Id)
             {
                 return NotFound();
             }
 
-            if (ModelState.IsValid)
+            if (!ModelState.IsValid)
             {
-                try
-                {
-                    _context.Update(musicoModel);
-                    await _context.SaveChangesAsync();
-                }
-                catch (DbUpdateConcurrencyException)
-                {
-                    if (!MusicoModelExists(musicoModel.Id))
-                    {
-                        return NotFound();
-                    }
-                    else
-                    {
-                        throw;
-                    }
-                }
-                return RedirectToAction(nameof(Index));
+                await PreencherSelectBandas(musicoViewModel.BandaId);
+
+                return View(musicoViewModel);
             }
-            ViewData["BandaId"] = new SelectList(_context.Bandas, "Id", "Id", musicoModel.BandaId);
-            return View(musicoModel);
+
+            try
+            {
+                await _musicoHttpService.EditAsync(musicoViewModel);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!(await BandaModelExistsAsync(musicoViewModel.Id)))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+            return RedirectToAction(nameof(Index));
         }
 
         // GET: Musico/Delete/5
@@ -130,15 +149,14 @@ namespace WebMVC.Controllers
                 return NotFound();
             }
 
-            var musicoModel = await _context.Musicos
-                .Include(m => m.Banda)
-                .FirstOrDefaultAsync(m => m.Id == id);
-            if (musicoModel == null)
+            var musicoViewModel = await _musicoHttpService.GetByIdAsync(id.Value);
+
+            if (musicoViewModel == null)
             {
                 return NotFound();
             }
 
-            return View(musicoModel);
+            return View(musicoViewModel);
         }
 
         // POST: Musico/Delete/5
@@ -146,15 +164,28 @@ namespace WebMVC.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteConfirmed(int id)
         {
-            var musicoModel = await _context.Musicos.FindAsync(id);
-            _context.Musicos.Remove(musicoModel);
-            await _context.SaveChangesAsync();
+            await _musicoHttpService.DeleteAsync(id);
+
             return RedirectToAction(nameof(Index));
         }
 
-        private bool MusicoModelExists(int id)
+        private async Task PreencherSelectBandas(int? bandaId = null)
         {
-            return _context.Musicos.Any(e => e.Id == id);
+            var bandas = await _bandaHttpService.GetAllAsync(true);
+
+            ViewBag.Bandas = new SelectList(bandas,
+                nameof(BandaViewModel.Id),
+                nameof(BandaViewModel.Nome),
+                bandaId);
+        }
+
+        private async Task<bool> BandaModelExistsAsync(int id)
+        {
+            var banda = await _musicoHttpService.GetByIdAsync(id);
+
+            var any = banda != null;
+
+            return any;
         }
     }
 }

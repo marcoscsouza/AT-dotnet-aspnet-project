@@ -10,6 +10,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using WebMVC.Data;
+using WebMVC.Services;
+using WebMVC.Services.Implementations;
 
 namespace WebMVC
 {
@@ -27,8 +29,17 @@ namespace WebMVC
         {
             services.AddControllersWithViews();
 
-            services.AddDbContext<BandaATContext>(options =>
-                    options.UseSqlServer(Configuration.GetConnectionString("BandaATContext")));
+            //services.AddDbContext<BandaATContext>(options =>
+            //        options.UseSqlServer(Configuration.GetConnectionString("BandaATContext")));
+
+            var bandaAddress = Configuration.GetValue<string>("ApiAddresses:Banda");
+            var MusicoAddress = Configuration.GetValue<string>("ApiAddresses:Musico");
+
+            services.AddHttpClient<IBandaHttpService, BandaHttpService>(x =>
+                x.BaseAddress = new Uri(bandaAddress));
+            services.AddHttpClient<IMusicoHttpService, MusicoHttpService>(x =>
+                x.BaseAddress = new Uri(MusicoAddress));
+
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -49,6 +60,7 @@ namespace WebMVC
 
             app.UseRouting();
 
+            app.UseAuthentication();
             app.UseAuthorization();
 
             app.UseEndpoints(endpoints =>
@@ -56,6 +68,7 @@ namespace WebMVC
                 endpoints.MapControllerRoute(
                     name: "default",
                     pattern: "{controller=Home}/{action=Index}/{id?}");
+                endpoints.MapRazorPages();
             });
         }
     }

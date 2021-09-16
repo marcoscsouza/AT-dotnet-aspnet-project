@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Model.Models;
 
-namespace WebMVC.Data
+namespace Data
 {
     public class BandaATContext : DbContext
     {
